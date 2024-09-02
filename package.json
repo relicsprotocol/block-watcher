@@ -2,22 +2,36 @@
   "name": "@relicsprotocol/reorg-watcher",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "test": "exit 0 ",
-    "prepare": "husky"
+    "prepare": "husky",
+    "build": "tsup"
   },
   "author": "",
   "license": "ISC",
   "publishConfig": {
-    "@YOUR-USERNAME:registry": "https://npm.pkg.github.com"
+    "@relicsprotocol:registry": "https://npm.pkg.github.com"
   },
   "devDependencies": {
+    "@types/lodash": "^4.17.7",
+    "@types/node": "^22.5.1",
     "husky": "^9.1.5",
     "lint-staged": "^15.2.9",
-    "prettier": "2.8.8"
+    "prettier": "2.8.8",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.2.4",
+    "typescript": "^5.5.4"
   },
   "lint-staged": {
     "**/*": "prettier --write --ignore-unknown"
+  },
+  "dependencies": {
+    "lodash": "^4.17.21"
   }
 }

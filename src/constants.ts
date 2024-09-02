@@ -1,0 +1,3 @@
+export const DEFAULT_REORG_DEPTH = 10;
+export const DEFAULT_POLL_INTERVAL = 10_000;
+export const DEFAULT_RETRY_DELAY = 5_000;

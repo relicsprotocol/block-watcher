@@ -1,0 +1,231 @@
+import {
+  DEFAULT_POLL_INTERVAL,
+  DEFAULT_REORG_DEPTH,
+  DEFAULT_RETRY_DELAY,
+} from "./constants";
+import {
+  Block,
+  OnNewBlockCallbackFn,
+  OnReorgedBlockCallbackFn,
+  TaskErrorHandling,
+} from "./types";
+import _ from "lodash";
+import { processTask } from "./utils";
+
+class BlockchainWatcher {
+  private startBlock?: number;
+  private _getBlock: (height: number) => Promise<Block | null>;
+  private _getChainHead: () => Promise<number | null>;
+  private pollInterval: number;
+  private maxReorgDepth: number;
+  private currentBlocks: Block[];
+  private newBlockCallbacks: OnNewBlockCallbackFn[];
+  private reorgedBlockCallbacks: OnReorgedBlockCallbackFn[];
+  private intervalId: NodeJS.Timeout | null;
+
+  constructor(config: {
+    startBlock?: number;
+    getBlock: (height: number) => Promise<Block>;
+    getChainHead: () => Promise<number>;
+    pollInterval?: number;
+    maxReorgDepth?: number;
+    taskErrorHandling?: TaskErrorHandling; // New configuration option
+  }) {
+    this.startBlock = config.startBlock;
+
+    // api methods
+    this._getBlock = config.getBlock;
+    this._getChainHead = config.getChainHead;
+
+    // config
+    this.pollInterval = config.pollInterval || DEFAULT_POLL_INTERVAL;
+    this.maxReorgDepth = config.maxReorgDepth || DEFAULT_REORG_DEPTH;
+
+    // initialize
+    this.currentBlocks = [];
+    this.intervalId = null;
+    this.newBlockCallbacks = [];
+    this.reorgedBlockCallbacks = [];
+  }
+
+  // API
+  private async getBlock(height: number): Promise<Block | null> {
+    try {
+      const block = await this._getBlock(height);
+      return block;
+    } catch (error) {
+      console.error(`Error fetching block ${height}:`, error);
+      return null;
+    }
+  }
+
+  private async getChainHead(): Promise<number> {
+    try {
+      const chainHead = await this._getChainHead();
+      if (!chainHead) throw new Error("Chain head not found in response");
+      return chainHead;
+    } catch (error) {
+      throw new Error(`Error fetching chain head: ${error}`);
+    }
+  }
+
+  private async pollBlock(height: number): Promise<Block> {
+    let onchainBlock: null | Block = null;
+    while (!onchainBlock) {
+      onchainBlock = await this.getBlock(height);
+      await new Promise((resolve) => setTimeout(resolve, DEFAULT_RETRY_DELAY));
+      console.log(`Block ${height} not found, retrying...`);
+    }
+    return onchainBlock;
+  }
+
+  private async pollChainHead(): Promise<number> {
+    let chainHead: null | number = null;
+    while (!chainHead) {
+      chainHead = await this.getChainHead();
+      await new Promise((resolve) => setTimeout(resolve, DEFAULT_RETRY_DELAY));
+      console.log(`Chain head not found, retrying...`);
+    }
+    return chainHead;
+  }
+
+  // START
+  public async start() {
+    if (this.intervalId) throw new Error("Already started");
+
+    const startBlock = this.startBlock || (await this.pollChainHead());
+
+    this.pollChain(startBlock);
+  }
+
+  // CALLBACK REGISTRATION
+  public onNewBlock(callback: OnNewBlockCallbackFn) {
+    this.newBlockCallbacks.push(callback);
+  }
+
+  public onReorgedBlock(callback: OnReorgedBlockCallbackFn) {
+    this.reorgedBlockCallbacks.push(callback);
+  }
+
+  // STATUS
+  public async isAtChainHead(): Promise<boolean> {
+    const highestBlock = this.getHighestBlock();
+    if (!highestBlock) return false;
+    return highestBlock.height === (await this.getChainHead());
+  }
+
+  public getHighestBlock(): Block | null {
+    return _.last(this.currentBlocks) || null;
+  }
+
+  // REORG
+  private async isBlockReorged(
+    block: Block
+  ): Promise<{ reorged: boolean; updatedBlock: Block }> {
+    const savedBlock = this.currentBlocks.find(
+      (b) => b.height === block.height
+    );
+    if (!savedBlock) {
+      throw new Error(`Block ${block.height} not found in saved blocks`);
+    }
+
+    /**
+     * It's not fully unlikely that during a reorg the block is not found in the first try
+     * since it is not yet fully synced with whatever backend we are using.
+     * So we poll the block until we get it.
+     */
+    const onchainBlock = await this.pollBlock(block.height);
+
+    // that means that it is reorged and potentially also previous and next blocks are affected
+    if (savedBlock.hash !== onchainBlock.hash) {
+      console.log(`Block ${block.height} reorged`);
+      return { reorged: true, updatedBlock: onchainBlock };
+    }
+
+    return { reorged: false, updatedBlock: block };
+  }
+
+  private async handleDetectedReorg() {
+    // we go back from the newest block we have and collect the reorged blocks.
+    const reversedBlocks = _.reverse(this.currentBlocks);
+
+    for (const block of reversedBlocks) {
+      const { reorged, updatedBlock } = await this.isBlockReorged(block);
+      if (reorged) {
+        // we replace the block with the onchain block
+        const index = _.findIndex(this.currentBlocks, { height: block.height });
+        this.currentBlocks[index] = updatedBlock;
+        await this.processReorgedBlockCallbacks(updatedBlock);
+      } else {
+        break;
+      }
+    }
+  }
+
+  // NEW BLOCK
+  private async handleDetectedNewBlock(block: Block) {
+    this.currentBlocks.push(block);
+    if (this.currentBlocks.length > this.maxReorgDepth) {
+      this.currentBlocks.shift();
+    }
+
+    await this.processNewBlockCallbacks(block);
+  }
+
+  // MAIN
+  private async pollChain(startBlock?: number) {
+    let nextBlock: Block | null = null;
+    let reorgsInPrevBlock = true;
+
+    // we handle all reorgs and make safe that we didn't get a new one while handling them
+    while (reorgsInPrevBlock) {
+      const savedChainHead = this.getHighestBlock();
+      const nextHeight = savedChainHead?.height
+        ? savedChainHead.height + 1
+        : startBlock;
+
+      if (!nextHeight)
+        throw new Error("No start block provided and no blocks saved");
+
+      nextBlock = await this.getBlock(nextHeight);
+
+      // we check if our highest saved block got a reorg while we last touched it. If it hasn't been reorged, then no other block has been reorged (depends on the backend we are syncing from)
+      const { reorged } = await this.isBlockReorged(
+        this.currentBlocks[this.currentBlocks.length - 1]
+      );
+      reorgsInPrevBlock = reorged;
+
+      // don't forget, this might take a while, so we have to check if there were new reorgs
+      if (reorgsInPrevBlock) {
+        await this.handleDetectedReorg();
+      }
+    }
+
+    if (nextBlock) {
+      await this.handleDetectedNewBlock(nextBlock);
+    }
+
+    this.intervalId = setTimeout(() => this.pollChain(), this.pollInterval);
+  }
+
+  // CALLBACK HANDLING
+  private async processNewBlockCallbacks(block: Block) {
+    for (const callback of this.newBlockCallbacks) {
+      // we infinitely retry the callback until it succeeds
+      await processTask(() => callback(block.height, block.hash), {
+        retryDelay: 5000,
+        taskErrorHandling: "retry",
+      });
+    }
+  }
+
+  private async processReorgedBlockCallbacks(block: Block) {
+    for (const callback of this.reorgedBlockCallbacks) {
+      // we infinitely retry the callback until it succeeds
+      await processTask(() => callback(block.height, block.hash), {
+        retryDelay: 5000,
+        taskErrorHandling: "retry",
+      });
+    }
+  }
+}
