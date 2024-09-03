@@ -14,3 +14,6 @@ export type OnReorgedBlockCallbackFn = (
 ) => Promise<void>;
 
 export type TaskErrorHandling = "skip" | "retry";
+
+export type GetBlockFn = (height: number) => Promise<Block | null>;
+export type GetChainHeadFn = () => Promise<number | null>;

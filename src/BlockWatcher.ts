@@ -5,6 +5,8 @@ import {
 } from "./constants";
 import {
   Block,
+  GetBlockFn,
+  GetChainHeadFn,
   OnNewBlockCallbackFn,
   OnReorgedBlockCallbackFn,
   TaskErrorHandling,
@@ -15,8 +17,8 @@ import { processTask } from "./utils";
 export class ReorgWatcher {
   // config
   private startBlock?: number;
-  private _getBlock: (height: number) => Promise<Block | null>;
-  private _getChainHead: () => Promise<number | null>;
+  private _getBlock: GetBlockFn;
+  private _getChainHead: GetChainHeadFn;
   private pollInterval: number;
   private maxReorgDepth: number;
   private taskErrorHandling: TaskErrorHandling;
@@ -28,9 +30,9 @@ export class ReorgWatcher {
   private intervalId: NodeJS.Timeout | null;
 
   constructor(config: {
+    getBlock: GetBlockFn;
+    getChainHead: GetChainHeadFn;
     startBlock?: number;
-    getBlock: (height: number) => Promise<Block>;
-    getChainHead: () => Promise<number>;
     pollInterval?: number;
     maxReorgDepth?: number;
     taskErrorHandling?: TaskErrorHandling;
@@ -70,11 +72,15 @@ export class ReorgWatcher {
 
       nextBlock = await this.getBlock(nextHeight);
 
-      // we check if our highest saved block got a reorg while we last touched it. If it hasn't been reorged, then no other block has been reorged (depends on the backend we are syncing from)
-      const { reorged } = await this.isBlockReorged(
-        this.currentBlocks[this.currentBlocks.length - 1]
-      );
-      reorgsInPrevBlock = reorged;
+      if (this.currentBlocks.length) {
+        // we check if our highest saved block got a reorg while we last touched it. If it hasn't been reorged, then no other block has been reorged (depends on the backend we are syncing from)
+        const { reorged } = await this.isBlockReorged(
+          this.currentBlocks[this.currentBlocks.length - 1]
+        );
+        reorgsInPrevBlock = reorged;
+      } else {
+        reorgsInPrevBlock = false;
+      }
 
       // don't forget, this might take a while, so we have to check if there were new reorgs
       if (reorgsInPrevBlock) {
@@ -115,7 +121,9 @@ export class ReorgWatcher {
     while (!onchainBlock) {
       onchainBlock = await this.getBlock(height);
       await new Promise((resolve) => setTimeout(resolve, DEFAULT_RETRY_DELAY));
-      console.log(`Block ${height} not found, retrying...`);
+      if (!onchainBlock) {
+        console.log(`Block ${height} not found, retrying...`);
+      }
     }
     return onchainBlock;
   }
@@ -125,7 +133,9 @@ export class ReorgWatcher {
     while (!chainHead) {
       chainHead = await this.getChainHead();
       await new Promise((resolve) => setTimeout(resolve, DEFAULT_RETRY_DELAY));
-      console.log(`Chain head not found, retrying...`);
+      if (!chainHead) {
+        console.log(`Chain head not found, retrying...`);
+      }
     }
     return chainHead;
   }
