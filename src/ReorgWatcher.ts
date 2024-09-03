@@ -12,12 +12,16 @@ import {
 import _ from "lodash";
 import { processTask } from "./utils";
 
-class BlockchainWatcher {
+export class ReorgWatcher {
+  // config
   private startBlock?: number;
   private _getBlock: (height: number) => Promise<Block | null>;
   private _getChainHead: () => Promise<number | null>;
   private pollInterval: number;
   private maxReorgDepth: number;
+  private taskErrorHandling: TaskErrorHandling;
+
+  // state
   private currentBlocks: Block[];
   private newBlockCallbacks: OnNewBlockCallbackFn[];
   private reorgedBlockCallbacks: OnReorgedBlockCallbackFn[];
@@ -29,7 +33,7 @@ class BlockchainWatcher {
     getChainHead: () => Promise<number>;
     pollInterval?: number;
     maxReorgDepth?: number;
-    taskErrorHandling?: TaskErrorHandling; // New configuration option
+    taskErrorHandling?: TaskErrorHandling;
   }) {
     this.startBlock = config.startBlock;
 
@@ -40,12 +44,49 @@ class BlockchainWatcher {
     // config
     this.pollInterval = config.pollInterval || DEFAULT_POLL_INTERVAL;
     this.maxReorgDepth = config.maxReorgDepth || DEFAULT_REORG_DEPTH;
+    this.taskErrorHandling = config.taskErrorHandling || "retry";
 
     // initialize
     this.currentBlocks = [];
     this.intervalId = null;
     this.newBlockCallbacks = [];
     this.reorgedBlockCallbacks = [];
+  }
+
+  // MAIN
+  private async pollChain(startBlock?: number) {
+    let nextBlock: Block | null = null;
+    let reorgsInPrevBlock = true;
+
+    // we handle all reorgs and make safe that we didn't get a new one while handling them
+    while (reorgsInPrevBlock) {
+      const savedChainHead = this.getHighestBlock();
+      const nextHeight = savedChainHead?.height
+        ? savedChainHead.height + 1
+        : startBlock;
+
+      if (!nextHeight)
+        throw new Error("No start block provided and no blocks saved");
+
+      nextBlock = await this.getBlock(nextHeight);
+
+      // we check if our highest saved block got a reorg while we last touched it. If it hasn't been reorged, then no other block has been reorged (depends on the backend we are syncing from)
+      const { reorged } = await this.isBlockReorged(
+        this.currentBlocks[this.currentBlocks.length - 1]
+      );
+      reorgsInPrevBlock = reorged;
+
+      // don't forget, this might take a while, so we have to check if there were new reorgs
+      if (reorgsInPrevBlock) {
+        await this.handleDetectedReorg();
+      }
+    }
+
+    if (nextBlock) {
+      await this.handleDetectedNewBlock(nextBlock);
+    }
+
+    this.intervalId = setTimeout(() => this.pollChain(), this.pollInterval);
   }
 
   // API
@@ -111,7 +152,7 @@ class BlockchainWatcher {
   public async isAtChainHead(): Promise<boolean> {
     const highestBlock = this.getHighestBlock();
     if (!highestBlock) return false;
-    return highestBlock.height === (await this.getChainHead());
+    return highestBlock.height === (await this.pollChainHead());
   }
 
   public getHighestBlock(): Block | null {
@@ -172,49 +213,13 @@ class BlockchainWatcher {
     await this.processNewBlockCallbacks(block);
   }
 
-  // MAIN
-  private async pollChain(startBlock?: number) {
-    let nextBlock: Block | null = null;
-    let reorgsInPrevBlock = true;
-
-    // we handle all reorgs and make safe that we didn't get a new one while handling them
-    while (reorgsInPrevBlock) {
-      const savedChainHead = this.getHighestBlock();
-      const nextHeight = savedChainHead?.height
-        ? savedChainHead.height + 1
-        : startBlock;
-
-      if (!nextHeight)
-        throw new Error("No start block provided and no blocks saved");
-
-      nextBlock = await this.getBlock(nextHeight);
-
-      // we check if our highest saved block got a reorg while we last touched it. If it hasn't been reorged, then no other block has been reorged (depends on the backend we are syncing from)
-      const { reorged } = await this.isBlockReorged(
-        this.currentBlocks[this.currentBlocks.length - 1]
-      );
-      reorgsInPrevBlock = reorged;
-
-      // don't forget, this might take a while, so we have to check if there were new reorgs
-      if (reorgsInPrevBlock) {
-        await this.handleDetectedReorg();
-      }
-    }
-
-    if (nextBlock) {
-      await this.handleDetectedNewBlock(nextBlock);
-    }
-
-    this.intervalId = setTimeout(() => this.pollChain(), this.pollInterval);
-  }
-
   // CALLBACK HANDLING
   private async processNewBlockCallbacks(block: Block) {
     for (const callback of this.newBlockCallbacks) {
       // we infinitely retry the callback until it succeeds
       await processTask(() => callback(block.height, block.hash), {
-        retryDelay: 5000,
-        taskErrorHandling: "retry",
+        retryDelay: DEFAULT_RETRY_DELAY,
+        taskErrorHandling: this.taskErrorHandling,
       });
     }
   }
@@ -223,8 +228,8 @@ class BlockchainWatcher {
     for (const callback of this.reorgedBlockCallbacks) {
       // we infinitely retry the callback until it succeeds
       await processTask(() => callback(block.height, block.hash), {
-        retryDelay: 5000,
-        taskErrorHandling: "retry",
+        retryDelay: DEFAULT_RETRY_DELAY,
+        taskErrorHandling: this.taskErrorHandling,
       });
     }
   }
