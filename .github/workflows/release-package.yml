@@ -16,7 +16,7 @@ jobs:
       - run: pnpm install
       - run: pnpm test
 
-  publish-gpr:
+  publish-github-packages:
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -26,10 +26,45 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          registry-url: https://npm.pkg.github.com/
+          node-version: 16
+          registry-url: https://npm.pkg.github.com/ # Use GitHub Packages registry
       - run: npm install -g pnpm # Install pnpm
+
+      # Cache pnpm dependencies
+      - name: Cache pnpm store
+        uses: actions/cache@v3
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
       - run: pnpm install
-      - run: pnpm publish --no-git-checks
+      - run: pnpm publish --no-git-checks # Publish to GitHub Packages
         env:
           NODE_AUTH_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+  publish-npm:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 16
+          registry-url: https://registry.npmjs.org/ # Use npmjs.org registry
+      - run: npm install -g pnpm # Install pnpm
+
+      # Cache pnpm dependencies
+      - name: Cache pnpm store
+        uses: actions/cache@v3
+        with:
+          path: ~/.pnpm-store
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
+
+      - run: pnpm install
+      - run: pnpm publish --no-git-checks # Publish to npmjs.com
+        env:
+          NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}

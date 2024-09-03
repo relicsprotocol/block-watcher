@@ -1,6 +1,6 @@
 {
   "name": "@relicsprotocol/block-watcher",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -9,15 +9,12 @@
     "dist"
   ],
   "scripts": {
-    "test": "exit 0 ",
+    "test": "exit 0",
     "prepare": "husky",
     "build": "tsup"
   },
   "author": "",
-  "license": "ISC",
-  "publishConfig": {
-    "@relicsprotocol:registry": "https://npm.pkg.github.com"
-  },
+  "license": "Apache-2.0",
   "devDependencies": {
     "@types/lodash": "^4.17.7",
     "@types/node": "^22.5.1",
