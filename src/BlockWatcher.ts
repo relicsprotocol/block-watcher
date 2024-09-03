@@ -14,7 +14,7 @@ import {
 import _ from "lodash";
 import { processTask } from "./utils";
 
-export class ReorgWatcher {
+export class BlockWatcher {
   // config
   private startBlock?: number;
   private _getBlock: GetBlockFn;
