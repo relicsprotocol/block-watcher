@@ -14,23 +14,23 @@ import {
 import _ from "lodash";
 import { processTask } from "./utils";
 
-export class BlockWatcher {
+export class BlockWatcher<T extends Block> {
   // config
   private startBlock?: number;
-  private _getBlock: GetBlockFn;
+  private _getBlock: GetBlockFn<T>;
   private _getChainHead: GetChainHeadFn;
   private pollInterval: number;
   private maxReorgDepth: number;
   private taskErrorHandling: TaskErrorHandling;
 
   // state
-  private currentBlocks: Block[];
-  private newBlockCallbacks: OnNewBlockCallbackFn[];
-  private reorgedBlockCallbacks: OnReorgedBlockCallbackFn[];
+  private currentBlocks: T[];
+  private newBlockCallbacks: OnNewBlockCallbackFn<T>[];
+  private reorgedBlockCallbacks: OnReorgedBlockCallbackFn<T>[];
   private intervalId: NodeJS.Timeout | null;
 
   constructor(config: {
-    getBlock: GetBlockFn;
+    getBlock: GetBlockFn<T>;
     getChainHead: GetChainHeadFn;
     startBlock?: number;
     pollInterval?: number;
@@ -57,7 +57,7 @@ export class BlockWatcher {
 
   // MAIN
   private async pollChain(startBlock?: number) {
-    let nextBlock: Block | null = null;
+    let nextBlock: T | null = null;
     let reorgsInPrevBlock = true;
 
     // we handle all reorgs and make safe that we didn't get a new one while handling them
@@ -96,7 +96,7 @@ export class BlockWatcher {
   }
 
   // API
-  private async getBlock(height: number): Promise<Block | null> {
+  private async getBlock(height: number): Promise<T | null> {
     try {
       const block = await this._getBlock(height);
       return block;
@@ -116,8 +116,8 @@ export class BlockWatcher {
     }
   }
 
-  private async pollBlock(height: number): Promise<Block> {
-    let onchainBlock: null | Block = null;
+  private async pollBlock(height: number): Promise<T> {
+    let onchainBlock: null | T = null;
     while (!onchainBlock) {
       onchainBlock = await this.getBlock(height);
       await new Promise((resolve) => setTimeout(resolve, DEFAULT_RETRY_DELAY));
@@ -150,11 +150,11 @@ export class BlockWatcher {
   }
 
   // CALLBACK REGISTRATION
-  public onNewBlock(callback: OnNewBlockCallbackFn) {
+  public onNewBlock(callback: OnNewBlockCallbackFn<T>) {
     this.newBlockCallbacks.push(callback);
   }
 
-  public onReorgedBlock(callback: OnReorgedBlockCallbackFn) {
+  public onReorgedBlock(callback: OnReorgedBlockCallbackFn<T>) {
     this.reorgedBlockCallbacks.push(callback);
   }
 
@@ -165,14 +165,14 @@ export class BlockWatcher {
     return highestBlock.height === (await this.pollChainHead());
   }
 
-  public getHighestBlock(): Block | null {
+  public getHighestBlock(): T | null {
     return _.last(this.currentBlocks) || null;
   }
 
   // REORG
   private async isBlockReorged(
-    block: Block
-  ): Promise<{ reorged: boolean; updatedBlock: Block }> {
+    block: T
+  ): Promise<{ reorged: boolean; updatedBlock: T }> {
     const savedBlock = this.currentBlocks.find(
       (b) => b.height === block.height
     );
@@ -204,7 +204,10 @@ export class BlockWatcher {
       const { reorged, updatedBlock } = await this.isBlockReorged(block);
       if (reorged) {
         // we replace the block with the onchain block
-        const index = _.findIndex(this.currentBlocks, { height: block.height });
+        const index = _.findIndex(
+          this.currentBlocks,
+          (b) => b.height === block.height
+        );
         this.currentBlocks[index] = updatedBlock;
         await this.processReorgedBlockCallbacks(updatedBlock);
       } else {
@@ -214,7 +217,7 @@ export class BlockWatcher {
   }
 
   // NEW BLOCK
-  private async handleDetectedNewBlock(block: Block) {
+  private async handleDetectedNewBlock(block: T) {
     this.currentBlocks.push(block);
     if (this.currentBlocks.length > this.maxReorgDepth) {
       this.currentBlocks.shift();
@@ -224,20 +227,20 @@ export class BlockWatcher {
   }
 
   // CALLBACK HANDLING
-  private async processNewBlockCallbacks(block: Block) {
+  private async processNewBlockCallbacks(block: T) {
     for (const callback of this.newBlockCallbacks) {
       // we infinitely retry the callback until it succeeds
-      await processTask(() => callback(block.height, block.hash), {
+      await processTask(() => callback(block), {
         retryDelay: DEFAULT_RETRY_DELAY,
         taskErrorHandling: this.taskErrorHandling,
       });
     }
   }
 
-  private async processReorgedBlockCallbacks(block: Block) {
+  private async processReorgedBlockCallbacks(block: T) {
     for (const callback of this.reorgedBlockCallbacks) {
       // we infinitely retry the callback until it succeeds
-      await processTask(() => callback(block.height, block.hash), {
+      await processTask(() => callback(block), {
         retryDelay: DEFAULT_RETRY_DELAY,
         taskErrorHandling: this.taskErrorHandling,
       });

@@ -3,17 +3,10 @@ export type Block = {
   hash: string;
 };
 
-export type OnNewBlockCallbackFn = (
-  height: number,
-  hash: string
-) => Promise<void>;
-
-export type OnReorgedBlockCallbackFn = (
-  height: number,
-  hash: string
-) => Promise<void>;
+export type OnNewBlockCallbackFn<T extends Block> = (t: T) => Promise<void>;
+export type OnReorgedBlockCallbackFn<T extends Block> = (t: T) => Promise<void>;
 
 export type TaskErrorHandling = "skip" | "retry";
 
-export type GetBlockFn = (height: number) => Promise<Block | null>;
+export type GetBlockFn<T extends Block> = (height: number) => Promise<T | null>;
 export type GetChainHeadFn = () => Promise<number | null>;
