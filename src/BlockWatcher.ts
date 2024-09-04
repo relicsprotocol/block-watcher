@@ -208,9 +208,9 @@ export class BlockWatcher<T extends Block> {
           this.currentBlocks,
           (b) => b.height === block.height
         );
-
+        const preReorgBlock = _.cloneDeep(this.currentBlocks[index]);
         this.currentBlocks[index] = updatedBlock;
-        await this.processReorgedBlockCallbacks(updatedBlock);
+        await this.processReorgedBlockCallbacks(updatedBlock, preReorgBlock);
       } else {
         break;
       }
@@ -238,10 +238,10 @@ export class BlockWatcher<T extends Block> {
     }
   }
 
-  private async processReorgedBlockCallbacks(block: T) {
+  private async processReorgedBlockCallbacks(block: T, preReorgBlock: T) {
     for (const callback of this.reorgedBlockCallbacks) {
       // we infinitely retry the callback until it succeeds
-      await processTask(() => callback(block), {
+      await processTask(() => callback(block, preReorgBlock), {
         retryDelay: DEFAULT_RETRY_DELAY,
         taskErrorHandling: this.taskErrorHandling,
       });
