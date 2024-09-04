@@ -208,6 +208,7 @@ export class BlockWatcher<T extends Block> {
           this.currentBlocks,
           (b) => b.height === block.height
         );
+
         this.currentBlocks[index] = updatedBlock;
         await this.processReorgedBlockCallbacks(updatedBlock);
       } else {

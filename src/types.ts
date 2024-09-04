@@ -3,8 +3,11 @@ export type Block = {
   hash: string;
 };
 
-export type OnNewBlockCallbackFn<T extends Block> = (t: T) => Promise<void>;
-export type OnReorgedBlockCallbackFn<T extends Block> = (t: T) => Promise<void>;
+export type OnNewBlockCallbackFn<T extends Block> = (block: T) => Promise<void>;
+export type OnReorgedBlockCallbackFn<T extends Block> = (
+  block: T,
+  preReorgBlock: T
+) => Promise<void>;
 
 export type TaskErrorHandling = "skip" | "retry";
 
