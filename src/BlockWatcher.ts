@@ -32,7 +32,8 @@ export class BlockWatcher<T extends Block> {
   constructor(config: {
     getBlock: GetBlockFn<T>;
     getChainHead: GetChainHeadFn;
-    startBlock?: number;
+    preStartBlockState?: T[]; // array of Blocks that will be checked for reorgs by the worker before handling new block
+    startBlock?: number; // inclusive
     pollInterval?: number;
     maxReorgDepth?: number;
     taskErrorHandling?: TaskErrorHandling;
@@ -53,6 +54,40 @@ export class BlockWatcher<T extends Block> {
     this.intervalId = null;
     this.newBlockCallbacks = [];
     this.reorgedBlockCallbacks = [];
+
+    // initial state
+    if (config.preStartBlockState) {
+      // we check if the blocks are in the right order
+      const sortedBlocks = _.sortBy(config.preStartBlockState, "height");
+      if (!_.isEqual(sortedBlocks, config.preStartBlockState)) {
+        throw new Error("Blocks must be sorted by height");
+      }
+
+      // we check that there a are no missing blocks
+      const missingBlocks = _.difference(
+        _.range(
+          sortedBlocks[0].height,
+          sortedBlocks[sortedBlocks.length - 1].height + 1
+        ),
+        sortedBlocks.map((b) => b.height)
+      );
+
+      if (missingBlocks.length) {
+        throw new Error(`Blocks are missing: ${missingBlocks.join(", ")}`);
+      }
+
+      // we also check that a startblock is set and that the highest block is the startblock - 1
+      if (
+        !this.startBlock ||
+        sortedBlocks[sortedBlocks.length - 1].height !== this.startBlock - 1
+      ) {
+        throw new Error(
+          "Start block must be set and be the block before the highest block in the preStartBlockState"
+        );
+      }
+
+      this.currentBlocks = config.preStartBlockState;
+    }
   }
 
   // MAIN
@@ -146,6 +181,12 @@ export class BlockWatcher<T extends Block> {
 
     const startBlock = this.startBlock || (await this.pollChainHead());
 
+    // we check for reorgs in the initial state
+    if (this.currentBlocks.length) {
+      console.log("Checking for reorgs in initial state");
+      await this.handleDetectedReorg();
+    }
+
     this.pollChain(startBlock);
   }
 
@@ -203,6 +244,7 @@ export class BlockWatcher<T extends Block> {
     for (const block of reversedBlocks) {
       const { reorged, updatedBlock } = await this.isBlockReorged(block);
       if (reorged) {
+        console.log(`Reorg detected at block ${block.height}`);
         // we replace the block with the onchain block
         const index = _.findIndex(
           this.currentBlocks,
