@@ -241,6 +241,11 @@ export class BlockWatcher<T extends Block> {
     // we go back from the newest block we have and collect the reorged blocks.
     const reversedBlocks = _.reverse(this.currentBlocks);
 
+    const reorgedBlocks: {
+      updatedBlock: T;
+      preReorgBlock: T;
+    }[] = [];
+
     for (const block of reversedBlocks) {
       const { reorged, updatedBlock } = await this.isBlockReorged(block);
       if (reorged) {
@@ -252,9 +257,15 @@ export class BlockWatcher<T extends Block> {
         );
         const preReorgBlock = _.cloneDeep(this.currentBlocks[index]);
         this.currentBlocks[index] = updatedBlock;
-        await this.processReorgedBlockCallbacks(updatedBlock, preReorgBlock);
+
+        reorgedBlocks.push({ updatedBlock, preReorgBlock });
       } else {
         break;
+      }
+
+      // Process the collected reorged blocks from oldest to newest
+      for (const { updatedBlock, preReorgBlock } of _.reverse(reorgedBlocks)) {
+        await this.processReorgedBlockCallbacks(updatedBlock, preReorgBlock);
       }
     }
   }
