@@ -125,9 +125,10 @@ export class BlockWatcher<T extends Block> {
 
     if (nextBlock) {
       await this.handleDetectedNewBlock(nextBlock);
+      this.pollChain();
+    } else {
+      this.intervalId = setTimeout(() => this.pollChain(), this.pollInterval);
     }
-
-    this.intervalId = setTimeout(() => this.pollChain(), this.pollInterval);
   }
 
   // API
