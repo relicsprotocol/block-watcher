@@ -92,45 +92,59 @@ export class BlockWatcher<T extends Block> {
 
   // MAIN
   private async pollChain(startBlock?: number) {
+    console.time("pollChain Total Time"); // Measure total time for the pollChain function
+
     let nextBlock: T | null = null;
     let reorgsInPrevBlock = true;
 
     // we handle all reorgs and make safe that we didn't get a new one while handling them
     while (reorgsInPrevBlock) {
+      console.time("Fetch Next Block"); // Measure time to fetch the next block
       const savedChainHead = this.getHighestBlock();
       const nextHeight = savedChainHead?.height
         ? savedChainHead.height + 1
         : startBlock;
 
-      if (!nextHeight)
+      if (!nextHeight) {
+        console.timeEnd("Fetch Next Block");
         throw new Error("No start block provided and no blocks saved");
+      }
 
       nextBlock = await this.getBlock(nextHeight);
+      console.timeEnd("Fetch Next Block"); // End measuring time to fetch the next block
 
       if (this.currentBlocks.length) {
+        console.time("Check Reorged Block"); // Measure time to check for reorgs
         // we check if our highest saved block got a reorg while we last touched it. If it hasn't been reorged, then no other block has been reorged (depends on the backend we are syncing from)
         const { reorged } = await this.isBlockReorged(
           this.currentBlocks[this.currentBlocks.length - 1]
         );
         reorgsInPrevBlock = reorged;
+        console.timeEnd("Check Reorged Block"); // End measuring time to check for reorgs
       } else {
         reorgsInPrevBlock = false;
       }
 
       // don't forget, this might take a while, so we have to check if there were new reorgs
       if (reorgsInPrevBlock) {
+        console.time("Handle Detected Reorg"); // Measure time to handle reorgs
         await this.handleDetectedReorg();
+        console.timeEnd("Handle Detected Reorg"); // End measuring time to handle reorgs
       }
     }
 
     if (nextBlock) {
+      console.time("Handle New Block"); // Measure time to handle a new block
       await this.handleDetectedNewBlock(nextBlock);
+      console.timeEnd("Handle New Block"); // End measuring time to handle a new block
+
+      console.timeEnd("pollChain Total Time"); // End measuring total time for the pollChain function
       this.pollChain();
     } else {
+      console.timeEnd("pollChain Total Time"); // End measuring total time for the pollChain function
       this.intervalId = setTimeout(() => this.pollChain(), this.pollInterval);
     }
   }
-
   // API
   private async getBlock(height: number): Promise<T | null> {
     try {
@@ -156,8 +170,10 @@ export class BlockWatcher<T extends Block> {
     let onchainBlock: null | T = null;
     while (!onchainBlock) {
       onchainBlock = await this.getBlock(height);
-      await new Promise((resolve) => setTimeout(resolve, DEFAULT_RETRY_DELAY));
       if (!onchainBlock) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, DEFAULT_RETRY_DELAY)
+        );
         console.log(`Block ${height} not found, retrying...`);
       }
     }
