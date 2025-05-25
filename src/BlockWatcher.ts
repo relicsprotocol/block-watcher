@@ -151,7 +151,6 @@ export class BlockWatcher<T extends Block> {
       const block = await this._getBlock(height);
       return block;
     } catch (error) {
-      console.error(`Error fetching block ${height}:`, error);
       return null;
     }
   }
