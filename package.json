@@ -1,6 +1,6 @@
 {
   "name": "@relicsprotocol/block-watcher",
-  "version": "0.1.17",
+  "version": "0.1.20",
   "description": "",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
